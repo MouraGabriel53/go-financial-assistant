@@ -3,19 +3,22 @@
 #   - nenhuma porta publicada no host: o proxy do Coolify (Traefik) chega ao "web" pela rede do Docker e cuida do
 #     HTTPS. Em Domains, no serviço web, use https://seu.dominio:8080 (8080 é a porta interna do container);
 #   - sem container_name (o Coolify dá os nomes) e sem os serviços do WhatsApp;
-#   - chave mestra pela variável APP_SECRET_KEY (não há ./secrets no diretório do deploy).
+#   - chave mestra pela variável APP_SECRET_KEY (não há ./secrets no diretório do deploy);
+#   - migrations e backup.sh copiados para dentro das imagens: o Coolify resolve bind mounts relativos numa pasta do
+#     servidor que não tem o repositório (o banco nascia sem tabelas e o backup sem script).
 # Variáveis obrigatórias em Environment Variables: APP_SECRET_KEY (openssl rand -base64 32) e SETUP_TOKEN
 # (openssl rand -hex 16). O resto é opcional, como no .env.example.
 services:
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_USER: finassist
       POSTGRES_PASSWORD: finassist
       POSTGRES_DB: finassist
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finassist -d finassist"]
       interval: 5s
@@ -24,7 +27,9 @@ services:
     restart: unless-stopped
 
   backup:
-    image: postgres:16-alpine
+    build:
+      context: ./scripts
+      dockerfile: Dockerfile.backup
     restart: unless-stopped
     depends_on:
       postgres:
@@ -37,7 +42,6 @@ services:
       BACKUP_KEEP: ${BACKUP_KEEP:-14}
     volumes:
       - ./backups:/backups
-      - ./scripts/backup.sh:/backup.sh:ro
     entrypoint: ["sh", "/backup.sh"]
 
   app:

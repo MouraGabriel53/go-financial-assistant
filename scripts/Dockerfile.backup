@@ -1,0 +1,5 @@
+# Imagem do serviço de backup com o script dentro (usado pelo docker-compose.coolify.yml): no Coolify, o bind mount de
+# ./scripts/backup.sh não encontra o arquivo no servidor.
+FROM postgres:16-alpine
+
+COPY backup.sh /backup.sh

@@ -1,0 +1,5 @@
+# Postgres com as migrations dentro da imagem (usado pelo docker-compose.coolify.yml): no Coolify, o bind mount de
+# ./backend/migrations aponta para uma pasta vazia no servidor e o banco nascia sem tabelas.
+FROM postgres:16-alpine
+
+COPY migrations/*.sql /docker-entrypoint-initdb.d/
