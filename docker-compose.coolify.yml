@@ -1,0 +1,99 @@
+# Deploy pelo Coolify (Configuration → General → Docker Compose Location: /docker-compose.coolify.yml).
+# Diferenças em relação ao docker-compose.yml:
+#   - nenhuma porta publicada no host: o proxy do Coolify (Traefik) chega ao "web" pela rede do Docker e cuida do
+#     HTTPS. Em Domains, no serviço web, use https://seu.dominio:8080 (8080 é a porta interna do container);
+#   - sem container_name (o Coolify dá os nomes) e sem os serviços do WhatsApp;
+#   - chave mestra pela variável APP_SECRET_KEY (não há ./secrets no diretório do deploy).
+# Variáveis obrigatórias em Environment Variables: APP_SECRET_KEY (openssl rand -base64 32) e SETUP_TOKEN
+# (openssl rand -hex 16). O resto é opcional, como no .env.example.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: finassist
+      POSTGRES_PASSWORD: finassist
+      POSTGRES_DB: finassist
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finassist -d finassist"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  backup:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # O Docker cria ./backups como root no servidor; por isso o padrão aqui é 0:0.
+    user: "${BACKUP_UID:-0}:${BACKUP_GID:-0}"
+    environment:
+      PGPASSWORD: finassist
+      BACKUP_INTERVAL_HOURS: ${BACKUP_INTERVAL_HOURS:-24}
+      BACKUP_KEEP: ${BACKUP_KEEP:-14}
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "/backup.sh"]
+
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://finassist:finassist@postgres:5432/finassist?sslmode=disable
+      APP_SECRET_KEY: ${APP_SECRET_KEY:?defina APP_SECRET_KEY nas variáveis do Coolify}
+      SETUP_TOKEN: ${SETUP_TOKEN:-}
+      SETUP_REOPEN: ${SETUP_REOPEN:-}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:-}
+      DASHBOARD_2FA: ${DASHBOARD_2FA:-auto}
+      CHANNEL: ${CHANNEL:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_PAID_PLAN: ${GEMINI_PAID_PLAN:-false}
+      COACH_GEMINI_MODEL: ${COACH_GEMINI_MODEL:-}
+      DIGEST_ENABLED: ${DIGEST_ENABLED:-true}
+      DIGEST_WEEKDAY: ${DIGEST_WEEKDAY:-monday}
+      DIGEST_HOUR: ${DIGEST_HOUR:-9}
+      DIGEST_TIMEZONE: ${DIGEST_TIMEZONE:-America/Sao_Paulo}
+      PLUGGY_CLIENT_ID: ${PLUGGY_CLIENT_ID:-}
+      PLUGGY_CLIENT_SECRET: ${PLUGGY_CLIENT_SECRET:-}
+      PLUGGY_ITEM_IDS: ${PLUGGY_ITEM_IDS:-}
+      SYNC_INTERVAL_HOURS: ${SYNC_INTERVAL_HOURS:-6}
+      SYNC_LOOKBACK_DAYS: ${SYNC_LOOKBACK_DAYS:-60}
+      OWN_NAMES: ${OWN_NAMES:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 6s
+      timeout: 3s
+      retries: 15
+      start_period: 20s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    expose:
+      - "8080"
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
